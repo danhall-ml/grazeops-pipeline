@@ -122,6 +122,8 @@ Once services are up, the main entry points are the reviewer UI at `http://local
 
 The Streamlit reviewer UI is not just a demo surface. It is the primary reviewer-facing interface for the operational procedures in `docs/runbook.md`: model update validation, data-quality investigation, and historical recommendation reproduction. The shell commands in the runbook are kept as direct backend equivalents.
 
+![Reviewer UI Service Tests](docs/images/reviewer-ui-service-tests.png)
+
 ## Smoke Tests
 
 For this assignment, the recommended smoke path is the isolated ephemeral flow:

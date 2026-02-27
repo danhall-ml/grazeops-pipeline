@@ -12,6 +12,8 @@ These procedures can be carried out through the Streamlit reviewer UI at `http:/
 - `Calculation` tab: run calculation checks for a specific version/config
 - `Explain` tab: reproduce and inspect historical recommendation lineage
 
+![Reviewer UI Service Tests](images/reviewer-ui-service-tests.png)
+
 Assumes you are in repo root and core services are up:
 
 ```bash
