@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This service is the reviewer-facing Streamlit interface for running service tests, inspecting payloads, and visualizing outputs.
+This service is the reviewer-facing Streamlit interface for carrying out the runbook workflows, running service tests, inspecting payloads, and visualizing outputs.
 
 ## API / Inputs / Outputs
 
@@ -15,6 +15,7 @@ This service is the reviewer-facing Streamlit interface for running service test
 - Outputs:
   - Test execution results (stdout/stderr and JSON responses)
   - Visualization of grazing recommendation data
+  - Operational views used in the runbook: model registration, smoke validation, scheduler status, recent ingestion runs, and failed data-quality checks
 
 ## Required Environment Variables
 

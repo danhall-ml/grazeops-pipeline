@@ -115,6 +115,34 @@ def _query_one(sql: str, params: tuple[Any, ...] = ()) -> Any:
         return conn.execute(sql, params).fetchone()
 
 
+def query_rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    """Execute a multi-row query against the configured operational DB.
+
+    Parameters
+    ----------
+    sql : str
+        SQL statement using SQLite-style placeholders.
+    params : tuple[Any, ...], default=()
+        Query parameters.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Result rows converted to dictionaries.
+    """
+    if DB_URL:
+        with psycopg.connect(DB_URL, row_factory=dict_row) as conn:
+            rows = conn.execute(_adapt_sql(sql, True), params).fetchall()
+            return [dict(row) for row in rows]
+
+    import sqlite3
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_default_boundary_id() -> str:
     """Return default boundary id for reviewer presets.
 

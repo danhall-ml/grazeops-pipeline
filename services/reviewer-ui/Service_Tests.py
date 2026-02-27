@@ -16,9 +16,12 @@ from utils import (
     DEFAULT_MODEL_VERSION,
     DEFAULT_SOURCE_DB,
     DEFAULT_START_DATE,
+    REGISTRY_URL,
+    SCHEDULER_URL,
     get_default_boundary_id,
     get_default_calc_date,
     parse_date_or_default,
+    query_rows,
     run_command,
     run_http_get,
     run_http_json,
@@ -37,6 +40,76 @@ def _parse_json_text(value: str) -> dict[str, Any] | None:
     except Exception:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _render_json_result(result: dict[str, Any]) -> None:
+    exit_code = int(result.get("returncode", 1))
+    if exit_code == 0:
+        st.success("Success")
+    elif bool(result.get("timed_out")):
+        st.error("Timed out")
+    else:
+        st.error(f"Failed (exit {exit_code})")
+        _render_failure(result)
+        return
+
+    parsed = _parse_json_text(str(result.get("stdout", "")))
+    if parsed is not None:
+        st.json(parsed)
+        return
+    _render_failure(result)
+
+
+def _render_smoke_result(result: dict[str, Any]) -> None:
+    exit_code = int(result.get("returncode", 1))
+    if exit_code == 0:
+        st.success("Success")
+    elif bool(result.get("timed_out")):
+        st.error("Timed out")
+    else:
+        st.error(f"Failed (exit {exit_code})")
+    stderr = str(result.get("stderr", "")).strip()
+    stdout = str(result.get("stdout", "")).strip()
+    if stdout:
+        st.code(stdout)
+    if stderr:
+        st.code(stderr)
+
+
+def _render_scheduler_status(result: dict[str, Any]) -> None:
+    exit_code = int(result.get("returncode", 1))
+    parsed = _parse_json_text(str(result.get("stdout", "")))
+    if exit_code != 0 or parsed is None:
+        st.error("Scheduler status is unavailable.")
+        _render_failure(result)
+        return
+
+    status = str(parsed.get("status", "")).strip() or "unknown"
+    violations = parsed.get("violations") if isinstance(parsed.get("violations"), list) else []
+    if status == "ok":
+        st.success("Scheduler status is ok.")
+    else:
+        st.error(f"Scheduler status is {status}.")
+
+    metrics = parsed.get("metrics") if isinstance(parsed.get("metrics"), dict) else {}
+    left_col, right_col, third_col = st.columns(3)
+    left_col.metric(
+        "Failed Runs (24h)",
+        int(((metrics.get("failed_runs_last_24h") or {}).get("ingestion") or 0))
+        + int(((metrics.get("failed_runs_last_24h") or {}).get("calculation") or 0)),
+    )
+    right_col.metric(
+        "Stuck Runs",
+        int(((metrics.get("stuck_runs") or {}).get("ingestion") or 0))
+        + int(((metrics.get("stuck_runs") or {}).get("calculation") or 0)),
+    )
+    third_col.metric(
+        "Last Scheduler Success Age (s)",
+        int(metrics.get("last_successful_scheduler_trigger_age_seconds") or 0),
+    )
+    if violations:
+        st.write("**Violations**")
+        st.dataframe([{"violation": item} for item in violations], use_container_width=True, hide_index=True)
 
 
 def _render_failure(result: dict[str, Any]) -> None:
@@ -190,12 +263,22 @@ if "service_test_result" not in st.session_state:
     st.session_state["service_test_result"] = None
 if "service_test_kind" not in st.session_state:
     st.session_state["service_test_kind"] = ""
+if "ops_registry_result" not in st.session_state:
+    st.session_state["ops_registry_result"] = None
+if "ops_smoke_result" not in st.session_state:
+    st.session_state["ops_smoke_result"] = None
+if "ops_status_result" not in st.session_state:
+    st.session_state["ops_status_result"] = None
 
 
 st.title("Service Tests")
-st.caption("Run ingestion, calculation, and explain checks with prefilled inputs.")
+st.caption(
+    "Use this page to execute the runbook workflows: register model updates, run validation, inspect operational status, and reproduce recommendations."
+)
 
-tab_ingest, tab_calculate, tab_explain = st.tabs(["Ingestion", "Calculation", "Explain"])
+tab_ingest, tab_calculate, tab_explain, tab_ops = st.tabs(
+    ["Ingestion", "Calculation", "Explain", "Operations"]
+)
 
 with tab_ingest:
     settings_col, payload_col = st.columns(2)
@@ -323,6 +406,96 @@ with tab_explain:
         st.session_state["service_test_result"] = run_http_get(
             endpoint, explain_payload, timeout_seconds=120
         )
+
+with tab_ops:
+    register_col, payload_col = st.columns(2)
+
+    with register_col:
+        with st.form("registry_form"):
+            registry_url = st.text_input("Registry URL", REGISTRY_URL)
+            registry_version = st.text_input("Model version", DEFAULT_MODEL_VERSION, key="registry_version")
+            registry_config = st.text_input("Config version", DEFAULT_CONFIG_VERSION, key="registry_config")
+            registry_description = st.text_input(
+                "Description",
+                "GrazeOps calculation model",
+                key="registry_description",
+            )
+            utilization_target_pct = st.number_input(
+                "Utilization target %",
+                min_value=1.0,
+                max_value=100.0,
+                value=50.0,
+                step=1.0,
+            )
+            submit_registry = st.form_submit_button("Register model update")
+
+    registry_payload = {
+        "version_id": registry_version,
+        "config_version": registry_config,
+        "description": registry_description,
+        "parameters": {"utilization_target_pct": utilization_target_pct},
+    }
+    with payload_col:
+        st.json(registry_payload)
+
+    if submit_registry:
+        endpoint = registry_url.rstrip("/") + "/models/register"
+        st.session_state["ops_registry_result"] = run_http_json(endpoint, registry_payload, timeout_seconds=60)
+
+    if st.session_state["ops_registry_result"] is not None:
+        st.subheader("Model Registry Result")
+        _render_json_result(st.session_state["ops_registry_result"])
+
+    left_col, right_col = st.columns(2)
+    with left_col:
+        st.subheader("Validation")
+        if st.button("Run smoke validation", use_container_width=True):
+            st.session_state["ops_smoke_result"] = run_command(
+                ["python3", "scripts/smoke_stack.py"],
+                timeout_seconds=240,
+            )
+        if st.session_state["ops_smoke_result"] is not None:
+            _render_smoke_result(st.session_state["ops_smoke_result"])
+
+    with right_col:
+        st.subheader("Scheduler Status")
+        if st.button("Refresh scheduler status", use_container_width=True):
+            st.session_state["ops_status_result"] = run_http_get(
+                SCHEDULER_URL.rstrip("/") + "/ops/status",
+                timeout_seconds=60,
+            )
+        if st.session_state["ops_status_result"] is not None:
+            _render_scheduler_status(st.session_state["ops_status_result"])
+
+    st.subheader("Recent Ingestion Runs")
+    recent_runs = query_rows(
+        """
+        SELECT ingestion_run_id, status, started_at, ended_at, error, snapshot_id
+        FROM ingestion_run_metadata
+        ORDER BY COALESCE(ended_at, started_at) DESC
+        LIMIT 20
+        """
+    )
+    if recent_runs:
+        st.dataframe(recent_runs, use_container_width=True, hide_index=True)
+    else:
+        st.info("No ingestion runs found.")
+
+    st.subheader("Recent Failed Data Quality Checks")
+    failed_checks = query_rows(
+        """
+        SELECT run_id, check_name, check_type, passed, details_json, checked_at
+        FROM data_quality_checks
+        WHERE passed = ?
+        ORDER BY checked_at DESC
+        LIMIT 20
+        """,
+        (0,),
+    )
+    if failed_checks:
+        st.dataframe(failed_checks, use_container_width=True, hide_index=True)
+    else:
+        st.info("No failed data quality checks found.")
 
 
 if st.session_state["service_test_result"] is not None:

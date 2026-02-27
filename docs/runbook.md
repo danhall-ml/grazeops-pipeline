@@ -6,6 +6,12 @@ This runbook covers the three required operational procedures for Part 1:
 2. Investigate a data-quality alert
 3. Reproduce a historical recommendation
 
+These procedures can be carried out through the Streamlit reviewer UI at `http://localhost:8501`. For normal reviewer/operator use, the UI is the primary path. The shell commands below are included as the direct backend equivalents for the same workflows and as a lower-level fallback when you want to debug service behavior directly.
+
+- `Operations` tab: register model updates, run smoke validation, inspect scheduler status, inspect recent ingestion runs, inspect recent failed DQ checks
+- `Calculation` tab: run calculation checks for a specific version/config
+- `Explain` tab: reproduce and inspect historical recommendation lineage
+
 Assumes you are in repo root and core services are up:
 
 ```bash
@@ -15,6 +21,10 @@ docker compose up -d
 ## 1. Deploy a Model Update
 
 Use this when DS ships a new logic version or parameter update.
+
+UI path: `Service Tests -> Operations`, then `Service Tests -> Calculation`.
+
+This full reviewer workflow is available in the UI. The only shell-only step below is the optional rebuild/restart path if calculation service code itself changed, which is a deployment action rather than a reviewer action.
 
 1. Register or update model metadata in the registry.
 
@@ -62,7 +72,11 @@ curl -sS -X POST http://localhost:8089/calculate \
 
 ## 2. Investigate a Data-Quality Alert
 
-Use this when scheduler ops status is degraded or UI indicates data issues.
+Use this when scheduler ops status is degraded or the UI indicates data issues.
+
+UI path: `Service Tests -> Operations`.
+
+Everything needed for this investigation is surfaced in the UI: scheduler status, recent ingestion runs, and recent failed DQ checks.
 
 1. Check top-level ops health and violations.
 
@@ -101,6 +115,10 @@ ORDER BY checked_at;
 ## 3. Reproduce a Historical Recommendation
 
 Use this when someone asks why a specific move recommendation was made.
+
+UI path: `Service Tests -> Explain`, then `Service Tests -> Calculation` if you want to re-run the same boundary/date/version inputs.
+
+The full reproduction workflow is available in the UI: fetch the explain payload, capture lineage fields, and re-run the same recommendation inputs.
 
 1. Pull the explain payload for the exact recommendation.
 

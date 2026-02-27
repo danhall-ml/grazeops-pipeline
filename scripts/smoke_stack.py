@@ -137,7 +137,7 @@ def main() -> None:
     scheduler_url = os.getenv("SCHEDULER_URL", "http://localhost:8090")
     boundary_candidates = [
         x.strip()
-        for x in os.getenv("BOUNDARY_CANDIDATES", "boundary_paddock_3,boundary_north_paddock_3").split(",")
+        for x in os.getenv("BOUNDARY_CANDIDATES", "boundary_north_paddock_3").split(",")
         if x.strip()
     ]
     calculation_date = os.getenv("CALCULATION_DATE", "2024-03-15")

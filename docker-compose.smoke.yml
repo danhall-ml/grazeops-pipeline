@@ -26,7 +26,7 @@ services:
       CALCULATION_DATE: "2024-03-15"
       MODEL_VERSION: "v2"
       CONFIG_VERSION: "default"
-      BOUNDARY_CANDIDATES: "boundary_paddock_3,boundary_north_paddock_3"
+      BOUNDARY_CANDIDATES: "boundary_north_paddock_3"
       SMOKE_MAX_WAIT_SECONDS: "60"
       SMOKE_RETRY_SECONDS: "2"
       SMOKE_HTTP_TIMEOUT_SECONDS: "45"

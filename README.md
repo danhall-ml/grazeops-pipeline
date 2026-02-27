@@ -1,10 +1,8 @@
----
-title: GrazeOps Pipeline
----
-
 ## GrazeOps Pipeline
 
-GrazeOps Pipeline is the Part 1 implementation of a grazing recommendation system. The pipeline begins with a ranch boundary and a reporting window, gathers the supporting data needed for that context, and produces a recommendation that can be acted on in operations: how many grazing days remain and when the herd should move.
+GrazeOps Pipeline is a production-style implementation of the Part 1 grazing intelligence assignment. The system takes a ranch boundary, a time window, and herd configuration, gathers the supporting pasture, soil, and weather data for that context, and produces a recommendation for when the herd should move.
+
+The main purpose of the repo is not to show a sophisticated model. It is to show how this kind of calculation can be turned into something operational: schedulable, reproducible, versioned, monitored, and explainable. The patterns here are meant to represent how a Data Science workflow can be packaged into services, run on a schedule, exposed through an API, and audited later when someone asks why a recommendation was made.
 
 The repository is organized as a collection of dockerized services. The current architecture is shown below, and grading alignment notes are tracked in `docs/rubric.md`.
 
@@ -18,7 +16,7 @@ The repository is organized as a collection of dockerized services. The current 
 - `calculation-service` is the API that runs recommendations and stores results. It also exposes endpoints to fetch the latest result and to explain how a result was produced.
 - `model-registry` stores model versions and related metadata. It keeps history so you can see what was registered and when.
 - `staging-service` takes a model from the registry, runs smoke checks, and writes pass/fail status back. This gives a clear test step before promotion.
-- `reviewer-ui` is the Streamlit app used to test services, view payloads, and inspect outputs and errors in one place.
+- `reviewer-ui` is the Streamlit app used to carry out the runbook workflows, test services, view payloads, and inspect outputs and errors in one place.
 
 ### Service READMEs
 
@@ -122,6 +120,8 @@ docker compose up --build
 
 Once services are up, the main entry points are the reviewer UI at `http://localhost:8501`, model registry at `http://localhost:8088`, calculation API at `http://localhost:8089`, and scheduler ops status at `http://localhost:8090/ops/status`.
 
+The Streamlit reviewer UI is not just a demo surface. It is the primary reviewer-facing interface for the operational procedures in `docs/runbook.md`: model update validation, data-quality investigation, and historical recommendation reproduction. The shell commands in the runbook are kept as direct backend equivalents.
+
 ## Smoke Tests
 
 For this assignment, the recommended smoke path is the isolated ephemeral flow:
@@ -141,7 +141,7 @@ python3 scripts/smoke_stack.py
 If your environment uses different boundary IDs, provide boundary candidates as an override:
 
 ```bash
-BOUNDARY_CANDIDATES="boundary_paddock_3,boundary_north_paddock_3" python3 scripts/smoke_stack.py
+BOUNDARY_CANDIDATES="boundary_north_paddock_3" python3 scripts/smoke_stack.py
 ```
 
 You can tune timing behavior with `SMOKE_MAX_WAIT_SECONDS` and `SMOKE_RETRY_SECONDS`, and optionally enable replay stability checks with `SMOKE_ENABLE_REPLAY_CHECK=1`.
@@ -164,24 +164,26 @@ docker compose --profile test run --rm test-runner
 
 ## Design Choices, Real World Deviations
 
-I made certain opinionated design choices during the design of this framework. My intent throughout this project is a basic illustration of some common workflows and patterns.
+I made a few deliberate design choices in this project. The goal was not to build a perfect production platform in miniature. The goal was to show the patterns I would use to take research-style logic and turn it into something that is more reliable, reproducible, and operationally usable.
 
-Sometimes I introduce additional complexity. Smoke tests run in their own ephemeral stack, which is the proper pattern here. This ensures tests do not touch long-running services or shared data. I also switched from the sqlite DB to PostgreSQL to avoid potential concurrency issues with testing while ingestion is running: if a manifest is written to a DB during ingest, this avoids locks.
+In some places, that meant adding a little more structure because it solves a real problem. Smoke tests run in their own temporary stack instead of against the long-running services. That keeps test runs isolated, prevents them from polluting shared state, and makes the results easier to trust. I also moved from SQLite to PostgreSQL once it became clear that ingestion activity and test activity could overlap. SQLite is fine for simple local workflows, but once multiple processes may read and write at the same time, PostgreSQL is the safer choice.
 
-Elsewhere, I attempt to reduce complexity. The scheduler/orchestrator for running ingestion is really nothing more than a container that runs a cron job. It's clear here that the ingestion engine does not require complex scheduling rules, but in the real world, if you had a more complex orchestrator such as Airflow/Prefect/Dagster running, you might simply hook up the ingestion engine to that instead. Otherwise it would be sufficient to simply use a cloud provider's containerized runtime scheduler, or to quite frankly continue using cron.
+In other places, I intentionally kept the design simple. The scheduler is just a small service that runs ingestion on a fixed interval. For this project, that is enough. The ingestion engine does not need a heavy orchestration layer to prove the design. In a real environment, the same ingestion engine could just as easily be triggered by Airflow, Prefect, Dagster, or a cloud scheduler. The important design choice is not the specific tool. It is keeping scheduling separate from ingestion so timing and execution logic do not get tangled together.
 
-For versioning tooling, I used Codex to scaffold a basic model registry service and then wired it into the stack so each run can reference a specific logic version. In reality, I would not build this from scratch—this would typically be handled by MLflow or a managed registry from a cloud vendor—but the lightweight service here makes version history and promotion status explicit for the assignment.
+I also included a lightweight model registry service. The point here is not to claim that I would build a full registry from scratch in production. The point is to make version history, staging status, and deployment flow explicit in a way that is easy to review. In a real system, I would usually lean on something like MLflow or a managed registry. For this assignment, though, the smaller service makes the ownership boundary and release path much easier to show clearly.
 
-In a more complete setup, the model registry would also be the place where training runs and artifacts are tracked, not just “versions.” That typically means storing run metadata (inputs, parameters, code version, metrics) and pointing to the actual artifacts (serialized models, feature configs, evaluation reports) in durable storage. I don’t implement full training-run tracking or artifact storage in this project because the recommendation logic is simple and the focus is on the deployment pattern, but the registry pattern here is meant to extend naturally in that direction as DS models become more complex.
+If this system grew, the registry would likely expand beyond simple version tracking. It would also track training runs, parameters, metrics, configuration snapshots, and pointers to artifacts stored elsewhere. I did not build all of that here because the recommendation logic is simple and the assignment is more about deployment pattern, reproducibility, and operational design than about model management at full scale.
 
-Were this service to continue running for long periods of time, old data simply needed for audits/reconstruction can be moved out of the database into very cheap tiers of cloud storage. Concretely, the DB only needs to keep the “hot” operational tables (latest runs, recent recommendations, current configs, and enough metadata to locate evidence). Older raw inputs and snapshots can be exported as immutable bundles (one per run with a manifest) into object storage, while the database keeps only pointers (IDs, timestamps, hashes, URIs) so a historical run can be fetched and replayed later without keeping everything online forever.
+I would also treat storage differently over a longer time horizon. The live database only needs the recent operational data, current configurations, recent recommendations, and enough metadata to explain or reproduce a run quickly. Older raw inputs and snapshots that mainly matter for audit can be moved into cheaper object storage. The database can then keep the IDs, hashes, timestamps, and storage locations needed to retrieve that older evidence later without forcing the operational system to carry everything forever.
 
-I do not do typical MLOps drift/deviation monitoring here due to the simplicity of the calculator and the type of data, but I have quite a bit of experience with this specific area. Actual monitoring routines might involve running anomaly detection on incoming data points (I prefer Isolation Forest / Robust Random Cut Forest with heavy compute, simpler statistical calculations for faster scoring), checking for data drift (normalized W1 distance), checking for performance degradation, etc. This often involves setting up more complicated pipelines with queues.
+I also did not add full drift or anomaly monitoring for the recommendation logic in this project. I mention it because those are controls that are commonly implemented in real production ML systems, and they are often part of the broader monitoring conversation when people talk about operational maturity. In this case, though, they are not especially valid for the current calculator. The logic here is simple, rules-based, and directly interpretable, so the more meaningful monitoring is around input freshness, completeness, run health, and reproducibility. If this calculator were later replaced with a more realistic learned model, drift and anomaly monitoring would become much more appropriate to add.
 
 ## What I Would Do With More Time
 
-The current system is intentionally compact for the assignment, but there are a few upgrades I would prioritize next. First, I would make the ingestion and calculation contracts stricter by formalizing request/response schemas across services and validating them at each boundary. This would reduce integration mistakes and make failures easier to debug.
+The biggest improvement would be more hands-on refinement of the code itself. I used Codex to scaffold parts of the implementation, but with more time I would do a more thorough human pass on structure, naming, and simplification across the services. The current version is functional and clear enough for the assignment, but there are places where I would tighten the code further rather than relying as much on generated scaffolding.
 
-Second, I would broaden testing in a practical way. Unit tests are already in place, but I would add a small set of deterministic end-to-end replay cases that run in CI on every pull request and verify full lineage output, not just endpoint success. I would also add one failure-path smoke test that proves rollback and status reporting work as expected when a release fails.
+I would also make parts of the operational flow feel more realistic. Some pieces in this project, especially around staging and model promotion, are intentionally lightweight stand-ins so the ownership boundaries and deployment pattern are visible. With more time, I would make those flows look more like a real environment, with clearer artifact handling and a more realistic path from candidate version to staged version to production release.
 
-Third, I would harden release operations and make them more automated. The current flow already describes CI/CD clearly, but I would add production-grade deployment safeguards such as environment-specific approval rules, canary progression checks, and an explicit rollback job that can be executed with one command. On the UI side, I would keep the rancher-facing view simple while improving map presentation and recommendation explanations so the tool feels clearer for non-technical users.
+On the UI side, I would spend more time polishing the Streamlit experience. The current app is enough to show the rancher-facing wireframe and service testing flow, but I would improve the layout, visual consistency, and wording so it feels more finished.
+
+Finally, I would improve the documentation structure. The content is there, but with more time I would tighten the organization further so the repo is even easier for a reviewer to navigate quickly.
