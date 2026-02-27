@@ -10,7 +10,7 @@ The third task is the problem of orchestration for the ingestion pipeline. This 
 
 The fourth task is the construction of the calculation service, which should store the results of runs in the DB. This too should be a seperate dockerized service. Note that due to the need to demonstrate actual Ops patterns, we should construct an alternate version of the calculation service as well, to be uploaded to a model registry. The calculation service serves the role of mimicking the model in deployments. 
 
-The fifth task is the deployment of a model registry. We should not assume automatically that the common Weights & Biases service/Weave is available for use, though this is often selected in the real world. This model registry should be deployed as another container. We do not need really need to store things like training artefacts here, but we can mention it. 
+The fifth task is the deployment of a model registry. We should not assume automatically that MLflow is available for use, even though that would be a very common real-world choice. This model registry should be deployed as another container. We do not need really need to store things like training artefacts here, but we can mention it. 
 
 The sixth task is the automatic staging of builds when a model, or in this case new version of the calculation service is committed. We can handle this through an automatic Docker build process rather than stuff like runners for this simple project. We should have simple tests in this container before the staging of builds. The focus is on SIMPLICITY for tests. CI pipeline will be refined later.
 
@@ -45,4 +45,3 @@ Recommendation/model output metadata
   - created_at (TIMESTAMP UTC): when the recommendation record was written.
 
 Do not make code excessively complex. If asked to generate code focus should be on simplicity and readability while fulfilling requirements. The goal is a MVP demonstrating a real world pipeline. 
-
