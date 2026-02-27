@@ -1,0 +1,173 @@
+services:
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: grazeops-postgres-db
+    environment:
+      POSTGRES_DB: grazeops
+      POSTGRES_USER: grazeops
+      POSTGRES_PASSWORD: grazeops
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/postgres-db/init_postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grazeops -d grazeops"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  model-registry:
+    build:
+      context: ./services/model-registry
+      dockerfile: Dockerfile
+    container_name: grazeops-model-registry
+    ports:
+      - "8088:8080"
+    volumes:
+      - ./model-registry:/registry-data
+
+  staging-service:
+    build:
+      context: .
+      dockerfile: services/staging-service/Dockerfile
+    container_name: grazeops-staging-service
+    profiles: ["manual"]
+    depends_on:
+      - model-registry
+    environment:
+      REGISTRY_URL: http://model-registry:8080
+      SCHEDULER_URL: http://scheduler:8082
+      REQUIRE_OPS_OK: "1"
+      MODEL_VERSION: "v2"
+      IMAGE_TAG: grazeops/calculation-service:staging
+
+  reviewer-ui:
+    build:
+      context: .
+      dockerfile: services/reviewer-ui/Dockerfile
+    container_name: grazeops-reviewer-ui
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      model-registry:
+        condition: service_started
+      calculation-service:
+        condition: service_started
+      scheduler:
+        condition: service_started
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./:/workspace
+      - ./inputs:/inputs:ro
+      - ./staging-builds:/staging-builds
+    environment:
+      WORKSPACE_ROOT: /workspace
+      DATABASE_URL: postgresql://grazeops:grazeops@postgres-db:5432/grazeops
+      REGISTRY_URL: http://model-registry:8080
+      CALCULATION_URL: http://calculation-service:8081
+      SCHEDULER_URL: http://scheduler:8082
+      SOURCE_DB_PATH: /inputs/pasture_reference.db
+      BOUNDARY_PATH: /inputs/sample_boundary.geojson
+      HERD_PATH: /inputs/sample_herds_pasturemap.json
+      START_DATE: "2024-01-01"
+      END_DATE: "2024-12-31"
+      MODEL_VERSION: "v1"
+      CONFIG_VERSION: "default"
+
+  ingestion-worker:
+    build:
+      context: ./services/ingestion-worker
+      dockerfile: Dockerfile
+    container_name: grazeops-ingestion-worker
+    profiles: ["manual"]
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    volumes:
+      - ./inputs:/inputs:ro
+      - ./manifests:/manifests
+    command:
+      - python
+      - /app/main.py
+      - --source-db
+      - /inputs/pasture_reference.db
+      - --boundary-path
+      - /inputs/sample_boundary.geojson
+      - --herd-path
+      - /inputs/sample_herds_pasturemap.json
+      - --start-date
+      - "2024-01-01"
+      - --end-date
+      - "2024-12-31"
+      - --backfill-weather
+    environment:
+      DATABASE_URL: postgresql://grazeops:grazeops@postgres-db:5432/grazeops
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: services/scheduler/Dockerfile
+    container_name: grazeops-scheduler
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    ports:
+      - "8090:8082"
+    volumes:
+      - ./inputs:/inputs:ro
+      - ./manifests:/manifests
+    environment:
+      DATABASE_URL: postgresql://grazeops:grazeops@postgres-db:5432/grazeops
+      SOURCE_DB_PATH: /inputs/pasture_reference.db
+      BOUNDARY_PATH: /inputs/sample_boundary.geojson
+      HERD_PATH: /inputs/sample_herds_pasturemap.json
+      START_DATE: "2024-01-01"
+      END_DATE: "2024-12-31"
+      BACKFILL_WEATHER: "1"
+      PREFER_OPENMETEO: "0"
+      RUN_ONCE: "0"
+      SCHEDULE_INTERVAL_SECONDS: "300"
+      WAIT_FOR_DB_SECONDS: "30"
+      LOCK_TTL_MINUTES: "30"
+      RAP_STALE_DAYS: "32"
+      MANIFEST_DIR: /manifests
+      ENABLE_API: "1"
+      API_HOST: 0.0.0.0
+      API_PORT: "8082"
+      OPS_MAX_FAILED_RUNS_24H: "0"
+      OPS_STUCK_RUN_MINUTES: "30"
+
+  calculation-service:
+    build:
+      context: ./services/calculation-service
+      dockerfile: Dockerfile
+    container_name: grazeops-calculation-service
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      model-registry:
+        condition: service_started
+    ports:
+      - "8089:8081"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8081"
+      DATABASE_URL: postgresql://grazeops:grazeops@postgres-db:5432/grazeops
+      REGISTRY_URL: http://model-registry:8080
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: services/test-runner/Dockerfile
+    profiles: ["test"]
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    command:
+      - pytest
+      - -q
+
+volumes:
+  postgres_data:

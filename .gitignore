@@ -1,0 +1,16 @@
+*.db
+!inputs/pasture_reference.db
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# runtime/generated artifacts
+manifests/*.json
+staging-builds/calculation-service/*.json
+staging-builds/staging-state.json
+model-registry/v2_alt_*.json
+
+# local cleanup leftovers (root-owned from prior container runs)
+.legacy_manifests_*/
+.legacy_model-registry_*/
+**/.legacy___pycache___*/

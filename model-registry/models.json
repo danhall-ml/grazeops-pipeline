@@ -1,0 +1,26 @@
+{
+  "v2": {
+    "artifact_uri": "grazeops/calculation-service:staging-20260226T125008Z_v2",
+    "config_version": "alt",
+    "deployed_at": "2026-02-26T12:50:09Z",
+    "deprecated_at": null,
+    "description": "GrazeOps calculation model v2",
+    "parameters": {
+      "formula": "v1_core * precip_adjustment * temperature_adjustment",
+      "precip_adjustment": "<5mm=>0.85, >25mm=>1.05, else=>1.0",
+      "staging": {
+        "build_tag": "grazeops/calculation-service:staging-20260226T125008Z_v2",
+        "candidate_tag": "grazeops/calculation-service:candidate-20260226T125008Z_v2",
+        "manifest": "staging-builds/calculation-service/20260226T125008Z_v2.json",
+        "stage_tag": "grazeops/calculation-service:staging",
+        "status": "skipped",
+        "updated_at": "2026-02-26T12:50:09Z"
+      },
+      "temp_adjustment": "avg_temp_max_7d>=30C => 0.9",
+      "utilization_target_pct": 50.0,
+      "weather_adjustments": true
+    },
+    "updated_at": "2026-02-26T12:50:09Z",
+    "version_id": "v2"
+  }
+}
